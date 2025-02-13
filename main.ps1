@@ -141,16 +141,17 @@
 </Window>
 "@
 
+### Load required assemblies
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
 
-### XAML laden
+### Load XAML
 $Reader = (New-Object System.Xml.XmlNodeReader $XAML)
 $Window = [Windows.Markup.XamlReader]::Load($Reader)
 
-### Elemente finden
+### Find elements
 $txtComputerName = $Window.FindName("txtComputerName")
 $btnSearch = $Window.FindName("btnSearch")
 $pbSearch = $Window.FindName("pbSearch")
@@ -164,7 +165,7 @@ $txtArch = $Window.FindName("txtArch")
 $txtIP = $Window.FindName("txtIP")
 $txtMAC = $Window.FindName("txtMAC")
 
-### Hashtable für synchronisierte Elemente
+### Hashtable for synchronized access
 $sync = [System.Collections.Hashtable]::Synchronized(@{})
 $sync.Window = $Window
 $sync.txtDateTime = $txtDateTime
@@ -178,13 +179,13 @@ $sync.txtIP = $txtIP
 $sync.txtMAC = $txtMAC
 $sync.pbSearch = $pbSearch
 
-### Funktion zum Abrufen der Computerinformationen
+### Function to get computer information
 function Get-ComputerInfo {
     param (
         [string]$ComputerName
     )
     
-    # Update UI to show progress
+    ### Update UI to show progress
     $Window.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Normal, [Action]{
         $sync.pbSearch.Value = 0
         $sync.pbSearch.IsIndeterminate = $true
@@ -192,18 +193,19 @@ function Get-ComputerInfo {
         $btnSearch.IsEnabled = $false
     })
 
-    # Create and start background job
+    ### Create and start background job
     $sync.job = Start-Job -ScriptBlock {
         param($ComputerName)
         write-host "Getting computer info for $ComputerName..."
         try {
-            # System Info
+            ### System Info
             $CS = Get-WmiObject -Class Win32_ComputerSystem -ComputerName $ComputerName -ErrorAction Stop
             $OS = Get-WmiObject -Class Win32_OperatingSystem -ComputerName $ComputerName -ErrorAction Stop
             $NIC = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -ComputerName $ComputerName -ErrorAction Stop | 
                 Where-Object { $_.IPEnabled -eq $true } | Select-Object -First 1
             $LastBootTime = Get-WmiObject -Class Win32_OperatingSystem | Select-Object csname -ExpandProperty LastBootUpTime
             $FormattedBoot = [Management.ManagementDateTimeConverter]::ToDateTime($LastBootTime).ToString("yyyy/MM/dd hh:mm:ss tt")
+            ### Return result
             @{
                 Success = $true
                 DateTime = (Get-Date).ToString("dd.MM.yyyy HH:mm:ss")
@@ -217,25 +219,29 @@ function Get-ComputerInfo {
                 MACAddress = $NIC.MACAddress
             }
         }
+        ### Catch errors and return error message
         catch {
             @{
                 Success = $false
                 Error = $_.Exception.Message
             }
         }
+    ### Pass computer name to job
     } -ArgumentList $ComputerName
 
-    # Create timer to check job status
+    ### Create timer to check job status
     $sync.timer = New-Object System.Windows.Threading.DispatcherTimer
     $sync.timer.Interval = [TimeSpan]::FromMilliseconds(100)
     $sync.timerCount = 0
 
+    ### Timer tick event
     $sync.timer.Add_Tick({
-        $sync.timerCount++
+        $sync.timerCount++ ### Increment timer count
         write-host "Job state = $($sync.job.State), timerCount = $($sync.timerCount)"
+        ### Check if job is completed or timed out
         if ($sync.job.State -eq 'Completed' -or $sync.timerCount -ge 100) {
             $sync.timer.Stop()
-            
+            ### Try to receive job result
             try {
                 if ($sync.timerCount -ge 100) {
                     Write-Host "Job timed out"
@@ -243,19 +249,23 @@ function Get-ComputerInfo {
                         Stop-Job -Job $sync.job
                     }
                     
+                    ### Show timeout message
                     $Window.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Normal, [Action]{
                         [System.Windows.MessageBox]::Show(
-                            "Zeitüberschreitung beim Abrufen der Computerinformationen.",
+                            "Zeitüberschreitung beim Abrufen der Computerinformationen.\n
+                            Bitte überprüfen Sie den Computernamen und die Netzwerkverbindung.",
                             "Timeout",
                             [System.Windows.MessageBoxButton]::OK,
                             [System.Windows.MessageBoxImage]::Error
                         )
                     })
                 }
+                ### Job completed successfully
                 else {
                     $result = Receive-Job -Job $sync.job
                     Write-Host "Job completed. Result: $($result | ConvertTo-Json)"
                     
+                    ### Update UI with result
                     $Window.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Normal, [Action]{
                         if ($result.Success) {
                             $sync.txtDateTime.Text = $result.DateTime
@@ -269,7 +279,7 @@ function Get-ComputerInfo {
                             $sync.txtMAC.Text = $result.MACAddress ?? "N/A"
                         }
                         else {
-                            # Clear all fields
+                            ### Clear all fields
                             $sync.txtDateTime.Text = ""
                             $sync.txtCompName.Text = ""
                             $sync.txtLastBoot.Text = ""
@@ -279,7 +289,8 @@ function Get-ComputerInfo {
                             $sync.txtArch.Text = ""
                             $sync.txtIP.Text = ""
                             $sync.txtMAC.Text = ""
-                            
+
+                            ### Show error message
                             [System.Windows.MessageBox]::Show(
                                 "Fehler beim Abrufen der Computerinformationen:`n$($result.Error)",
                                 "Fehler",
@@ -291,11 +302,13 @@ function Get-ComputerInfo {
                 }
             }
             finally {
+                ### Clean up job and timer
                 if ($sync.job) {
                     Remove-Job -Job $sync.job
                     $sync.job = $null
                 }
                 
+                ### Update UI to show progress
                 $Window.Dispatcher.Invoke([System.Windows.Threading.DispatcherPriority]::Normal, [Action]{
                     $sync.pbSearch.IsIndeterminate = $false
                     $sync.pbSearch.Value = 100
@@ -305,6 +318,7 @@ function Get-ComputerInfo {
             }
         }
     })
+    ### Start timer
     $sync.timer.Start()
 }
 
@@ -318,7 +332,7 @@ $searchAction ={
             [System.Windows.MessageBoxButton]::YesNo,
             [System.Windows.MessageBoxImage]::Question
         )
-        
+        ### If user confirms, get choosed computer info
         if ($result -eq [System.Windows.MessageBoxResult]::Yes) {
             Get-ComputerInfo -ComputerName $txtComputerName.Text
         }
@@ -331,6 +345,7 @@ $searchAction ={
             [System.Windows.MessageBoxButton]::OK,
             [System.Windows.MessageBoxImage]::Warning
         )
+        ### Get local computer info if no computer name is entered
         Get-ComputerInfo -ComputerName $env:COMPUTERNAME
     }
 }
