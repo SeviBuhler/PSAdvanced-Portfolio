@@ -10,7 +10,7 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Titel -->
+        <!-- Title -->
         <TextBlock Grid.Row="0" 
                    Text="Computer Information Tool" 
                    FontSize="24" 
@@ -23,36 +23,89 @@
                    Height="2" 
                    Background="#CCCCCC"/>
 
-        <!-- Suchbereich -->
+        <!-- Search Area -->
         <Grid Grid.Row="1" Margin="10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="200"/>
-            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            
+            <!-- Manual Search Row -->
+            <Grid Grid.Row="0" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-            <TextBox Name="txtComputerName" 
-                     Grid.Column="0" 
-                     Height="25" 
-                     Margin="0,0,10,0"
-                     VerticalContentAlignment="Center"/>
+                <TextBox Name="txtComputerName" 
+                         Grid.Column="0" 
+                         Height="25" 
+                         Margin="0,0,10,0"
+                         VerticalContentAlignment="Center"/>
+                
+                <TextBlock Name="txtPlaceholder"
+                          Text="Computername eingeben..."
+                          Grid.Column="0"
+                          Margin="5,0,0,0"
+                          VerticalAlignment="Center"
+                          Foreground="Gray"
+                          IsHitTestVisible="False">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding Text, ElementName=txtComputerName}" Value=""/>
+                                        <Condition Binding="{Binding IsFocused, ElementName=txtComputerName}" Value="False"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                
+                <Button Name="btnSearch" 
+                        Grid.Column="1" 
+                        Content="Computer suchen" 
+                        Height="25" 
+                        Width="140"/>
+            </Grid>
             
-            <Button Name="btnSearch" 
-                    Grid.Column="1" 
-                    Content="Computer suchen" 
-                    Height="25" 
-                    Width="120" 
-                    Margin="0,0,10,0"/>
-            
-            <ProgressBar Name="pbSearch" 
-                        Grid.Column="2" 
-                        Height="20" 
-                        Minimum="0" 
-                        Maximum="100"
-                        Visibility="Hidden"/>
+            <!-- Network Search Row -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <ComboBox Name="cmbNetworkComputers"
+                          Grid.Column="0"
+                          Height="25"
+                          Margin="0,0,10,0"
+                          VerticalContentAlignment="Center"
+                          IsEnabled="False"/>
+                
+                <Button Name="btnDiscoverNetwork" 
+                        Grid.Column="1" 
+                        Content="Netzwerk durchsuchen" 
+                        Height="25" 
+                        Width="140"/>
+            </Grid>
         </Grid>
 
-        <!-- Informationsbereich -->
+        <!-- Progress Bar -->
+        <ProgressBar Name="pbSearch" 
+                     Grid.Row="1" 
+                     Height="2"
+                     Margin="10,0,10,0"
+                     VerticalAlignment="Bottom"
+                     Minimum="0" 
+                     Maximum="100"
+                     Visibility="Hidden"/>
+
+        <!-- Information Area -->
         <Border Grid.Row="2" Margin="10" Padding="10" BorderBrush="#CCCCCC" BorderThickness="1">
             <StackPanel>
                 <!-- Computer Info Section -->
@@ -164,6 +217,8 @@ $txtOS = $Window.FindName("txtOS")
 $txtArch = $Window.FindName("txtArch")
 $txtIP = $Window.FindName("txtIP")
 $txtMAC = $Window.FindName("txtMAC")
+$btnDiscoverNetwork = $Window.FindName("btnDiscoverNetwork")
+$cmbNetworkComputers = $Window.FindName("cmbNetworkComputers")
 
 ### Hashtable for synchronized access
 $sync = [System.Collections.Hashtable]::Synchronized(@{})
@@ -178,6 +233,8 @@ $sync.txtArch = $txtArch
 $sync.txtIP = $txtIP
 $sync.txtMAC = $txtMAC
 $sync.pbSearch = $pbSearch
+$sync.btnDiscoverNetwork = $btnDiscoverNetwork
+$sync.cmbNetworkComputers = $cmbNetworkComputers
 
 ### Function to get computer information
 function Get-ComputerInfo {
@@ -322,6 +379,162 @@ function Get-ComputerInfo {
     $sync.timer.Start()
 }
 
+
+# The button click handler
+$btnDiscoverNetwork.Add_Click({
+    $sync.btnDiscoverNetwork.IsEnabled = $false
+    $sync.cmbNetworkComputers.IsEnabled = $false
+    $sync.pbSearch.Visibility = "Visible"
+    $sync.pbSearch.IsIndeterminate = $true
+    
+    # Store the job in the sync hashtable with the function defined directly in the scriptblock
+    $sync.networkJob = Start-Job -ScriptBlock {
+        # Define the network discovery function
+        function Get-NetworkComputers {
+            $computers = @()
+            try {
+                # Get network neighbors
+                $neighbors = Get-NetNeighbor | 
+                    Where-Object { $_.State -ne 'Unreachable' -and $_.State -ne 'Permanent' } | 
+                    Select-Object IPaddress, LinkLayerAddress, State
+
+                Write-Host "Found $($neighbors.Count) network neighbors"
+
+                foreach ($neighbor in $neighbors) {
+                    try {
+                        Write-Host "Processing neighbor $($neighbor.IPAddress)"
+                        # Get hostname using Resolve-DnsName
+                        $hostname = $null
+                        try {
+                            $dnsResult = Resolve-DnsName -Name $neighbor.IPAddress -ErrorAction Stop
+                            $hostname = $dnsResult.NameHost
+                            Write-Host "Resolved hostname: $hostname"
+                        }
+                        catch {
+                            Write-Warning "Could not resolve hostname for $($neighbor.IPAddress): $_"
+                            continue
+                        }
+
+                        # Add to computers array if we have a hostname
+                        if (-not [string]::IsNullOrEmpty($hostname)) {
+                            $computers += [PSCustomObject]@{
+                                IPAddress = $neighbor.IPAddress
+                                Hostname = $hostname
+                                LinkLayerAddress = $neighbor.LinkLayerAddress
+                                State = $neighbor.State
+                            }
+                            Write-Host "Added computer: $hostname ($($neighbor.IPAddress))"
+                        }
+                    }
+                    catch {
+                        Write-Warning "Error processing neighbor $($neighbor.IPAddress): $_"
+                    }
+                }
+            }
+            catch {
+                Write-Warning "Error discovering network computers: $_"
+            }
+
+            Write-Host "Found total of $($computers.Count) computers"
+            # Sort and return unique computers
+            return $computers | 
+                Sort-Object Hostname -Unique |
+                Where-Object { $_.Hostname -ne $env:COMPUTERNAME }  # Exclude local computer
+        }
+
+        # Call the function and return results
+        Get-NetworkComputers
+    }
+    
+    # Create timer to check job status
+    $sync.networkTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $sync.networkTimer.Interval = [TimeSpan]::FromSeconds(1)
+    $sync.networkTimerCount = 0
+    
+    $sync.networkTimer.Add_Tick({
+        $sync.networkTimerCount++
+        Write-Host "Network discovery job state: $($sync.networkJob.State), timer count: $($sync.networkTimerCount)"
+        
+        if ($sync.networkJob.State -eq 'Completed' -or $sync.networkTimerCount -ge 60) {
+            $sync.networkTimer.Stop()
+            
+            try {
+                if ($sync.networkTimerCount -ge 60) {
+                    Write-Host "Network discovery timed out"
+                    if ($sync.networkJob) {
+                        Stop-Job -Job $sync.networkJob
+                    }
+                    
+                    $Window.Dispatcher.Invoke([Action]{
+                        [System.Windows.MessageBox]::Show(
+                            "Zeitüberschreitung bei der Netzwerksuche.",
+                            "Timeout",
+                            [System.Windows.MessageBoxButton]::OK,
+                            [System.Windows.MessageBoxImage]::Warning
+                        )
+                    })
+                }
+                else {
+                    $computers = Receive-Job -Job $sync.networkJob -ErrorAction Stop
+                    Write-Host "Received computers from job: $($computers | ConvertTo-Json)"
+                    
+                    $Window.Dispatcher.Invoke([Action]{
+                        $sync.cmbNetworkComputers.Items.Clear()
+                        
+                        if ($computers -and $computers.Count -gt 0) {
+                            foreach ($computer in $computers) {
+                                $displayText = "$($computer.Hostname) ($($computer.IPAddress))"
+                                if ($computer.State) {
+                                    $displayText += " - $($computer.State)"
+                                }
+                                if ($computer.LinkLayerAddress) {
+                                    $displayText += " - MAC: $($computer.LinkLayerAddress)"
+                                }
+                                $sync.cmbNetworkComputers.Items.Add($displayText)
+                                Write-Host "Added to ComboBox: $displayText"
+                            }
+                            $sync.cmbNetworkComputers.IsEnabled = $true
+                        }
+                        else {
+                            [System.Windows.MessageBox]::Show(
+                                "Keine Computer im Netzwerk gefunden.",
+                                "Information",
+                                [System.Windows.MessageBoxButton]::OK,
+                                [System.Windows.MessageBoxImage]::Information
+                            )
+                        }
+                    })
+                }
+            }
+            catch {
+                Write-Warning "Error processing network discovery results: $_"
+                $Window.Dispatcher.Invoke([Action]{
+                    [System.Windows.MessageBox]::Show(
+                        "Fehler bei der Netzwerksuche: $_",
+                        "Fehler",
+                        [System.Windows.MessageBoxButton]::OK,
+                        [System.Windows.MessageBoxImage]::Error
+                    )
+                })
+            }
+            finally {
+                if ($sync.networkJob) {
+                    Remove-Job -Job $sync.networkJob
+                    $sync.networkJob = $null
+                }
+                
+                $Window.Dispatcher.Invoke([Action]{
+                    $sync.btnDiscoverNetwork.IsEnabled = $true
+                    $sync.pbSearch.Visibility = "Hidden"
+                    $sync.pbSearch.IsIndeterminate = $false
+                })
+            }
+        }
+    })
+    
+    $sync.networkTimer.Start()
+})
+
 ### Event Handler für Suchen-Button
 $searchAction ={
     if ($txtComputerName.Text) {
@@ -349,6 +562,15 @@ $searchAction ={
         Get-ComputerInfo -ComputerName $env:COMPUTERNAME
     }
 }
+
+$cmbNetworkComputers.Add_SelectionChanged({
+    if ($sync.cmbNetworkComputers.SelectedItem) {
+        $selected = $sync.cmbNetworkComputers.SelectedItem.ToString()
+        # Extract only the hostname part (everything before the first space or parenthesis)
+        $hostname = $selected -replace '\s*\(.*$', ''
+        $txtComputerName.Text = $hostname
+    }
+})
 
 ### Button click event implementieren
 $btnSearch.Add_Click($searchAction)
