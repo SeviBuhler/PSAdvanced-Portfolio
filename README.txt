@@ -14,5 +14,3 @@ Anleitung zum Ausführen des Computer-Info-Tools:
 
 5. Nach erfolgreicher Installation können Sie das Computer-Info-Tool ausführen:
    .\main.ps1
-
-Hinweis: Die Installation muss nur einmal pro Computer durchgeführt werden.

@@ -1,4 +1,5 @@
-
+### Gui for computer information
+### Autor: Severin Bühler
 [xml]$XAML = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -255,14 +256,14 @@ function Get-ComputerInfo {
         param($ComputerName)
         write-host "Getting computer info for $ComputerName..."
         try {
-            ### System Info
+            ### Get System Info
             $CS = Get-WmiObject -Class Win32_ComputerSystem -ComputerName $ComputerName -ErrorAction Stop
             $OS = Get-WmiObject -Class Win32_OperatingSystem -ComputerName $ComputerName -ErrorAction Stop
             $NIC = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -ComputerName $ComputerName -ErrorAction Stop | 
                 Where-Object { $_.IPEnabled -eq $true } | Select-Object -First 1
             $LastBootTime = Get-WmiObject -Class Win32_OperatingSystem | Select-Object csname -ExpandProperty LastBootUpTime
             $FormattedBoot = [Management.ManagementDateTimeConverter]::ToDateTime($LastBootTime).ToString("yyyy/MM/dd hh:mm:ss tt")
-            ### Return result
+            ### Return the result
             @{
                 Success = $true
                 DateTime = (Get-Date).ToString("dd.MM.yyyy HH:mm:ss")
@@ -380,30 +381,30 @@ function Get-ComputerInfo {
 }
 
 
-# The button click handler
+### The button click handler
 $btnDiscoverNetwork.Add_Click({
-    $sync.btnDiscoverNetwork.IsEnabled = $false
-    $sync.cmbNetworkComputers.IsEnabled = $false
-    $sync.pbSearch.Visibility = "Visible"
-    $sync.pbSearch.IsIndeterminate = $true
+    $sync.btnDiscoverNetwork.IsEnabled = $false ### Disable button
+    $sync.cmbNetworkComputers.IsEnabled = $false ### Disable ComboBox
+    $sync.pbSearch.Visibility = "Visible" ### Show progress bar
+    $sync.pbSearch.IsIndeterminate = $true ### Enable indeterminate mode
     
-    # Store the job in the sync hashtable with the function defined directly in the scriptblock
+    ### Store the job in the sync hashtable with the function defined directly in the scriptblock
     $sync.networkJob = Start-Job -ScriptBlock {
-        # Define the network discovery function
+        ### Function to get network computers
         function Get-NetworkComputers {
             $computers = @()
             try {
-                # Get network neighbors
+                ### Get network neighbors
                 $neighbors = Get-NetNeighbor | 
                     Where-Object { $_.State -ne 'Unreachable' -and $_.State -ne 'Permanent' } | 
                     Select-Object IPaddress, LinkLayerAddress, State
 
                 Write-Host "Found $($neighbors.Count) network neighbors"
-
+                ### Process each neighbor
                 foreach ($neighbor in $neighbors) {
                     try {
                         Write-Host "Processing neighbor $($neighbor.IPAddress)"
-                        # Get hostname using Resolve-DnsName
+                        ### Get hostname using Resolve-DnsName
                         $hostname = $null
                         try {
                             $dnsResult = Resolve-DnsName -Name $neighbor.IPAddress -ErrorAction Stop
@@ -415,7 +416,7 @@ $btnDiscoverNetwork.Add_Click({
                             continue
                         }
 
-                        # Add to computers array if we have a hostname
+                        ### Add to computers array if hostname is not empty
                         if (-not [string]::IsNullOrEmpty($hostname)) {
                             $computers += [PSCustomObject]@{
                                 IPAddress = $neighbor.IPAddress
@@ -436,35 +437,35 @@ $btnDiscoverNetwork.Add_Click({
             }
 
             Write-Host "Found total of $($computers.Count) computers"
-            # Sort and return unique computers
+            ### Sort and return unique computers
             return $computers | 
                 Sort-Object Hostname -Unique |
                 Where-Object { $_.Hostname -ne $env:COMPUTERNAME }  # Exclude local computer
         }
-
-        # Call the function and return results
+        ### Call the function and return results
         Get-NetworkComputers
     }
     
-    # Create timer to check job status
+    ### Create timer to check job status
     $sync.networkTimer = New-Object System.Windows.Threading.DispatcherTimer
     $sync.networkTimer.Interval = [TimeSpan]::FromSeconds(1)
     $sync.networkTimerCount = 0
-    
+    ### Timer tick event
     $sync.networkTimer.Add_Tick({
         $sync.networkTimerCount++
         Write-Host "Network discovery job state: $($sync.networkJob.State), timer count: $($sync.networkTimerCount)"
-        
+        ### Check if job is completed or timed out
         if ($sync.networkJob.State -eq 'Completed' -or $sync.networkTimerCount -ge 60) {
             $sync.networkTimer.Stop()
             
             try {
+                ### Try to receive job results until timeout
                 if ($sync.networkTimerCount -ge 60) {
                     Write-Host "Network discovery timed out"
                     if ($sync.networkJob) {
                         Stop-Job -Job $sync.networkJob
                     }
-                    
+                    ### show timeout messsage if no device was found
                     $Window.Dispatcher.Invoke([Action]{
                         [System.Windows.MessageBox]::Show(
                             "Zeitüberschreitung bei der Netzwerksuche.",
@@ -474,13 +475,15 @@ $btnDiscoverNetwork.Add_Click({
                         )
                     })
                 }
+
+                ### if job completed successfully process the results
                 else {
                     $computers = Receive-Job -Job $sync.networkJob -ErrorAction Stop
                     Write-Host "Received computers from job: $($computers | ConvertTo-Json)"
-                    
+                    ### Update UI with results
                     $Window.Dispatcher.Invoke([Action]{
                         $sync.cmbNetworkComputers.Items.Clear()
-                        
+                        ### Add each computer to the ComboBox
                         if ($computers -and $computers.Count -gt 0) {
                             foreach ($computer in $computers) {
                                 $displayText = "$($computer.Hostname) ($($computer.IPAddress))"
@@ -495,6 +498,7 @@ $btnDiscoverNetwork.Add_Click({
                             }
                             $sync.cmbNetworkComputers.IsEnabled = $true
                         }
+                        ### if $computers empty show message
                         else {
                             [System.Windows.MessageBox]::Show(
                                 "Keine Computer im Netzwerk gefunden.",
@@ -506,6 +510,8 @@ $btnDiscoverNetwork.Add_Click({
                     })
                 }
             }
+
+            ### Error handling for job results
             catch {
                 Write-Warning "Error processing network discovery results: $_"
                 $Window.Dispatcher.Invoke([Action]{
@@ -517,25 +523,26 @@ $btnDiscoverNetwork.Add_Click({
                     )
                 })
             }
+
+            ### Clean up job and timer
             finally {
                 if ($sync.networkJob) {
                     Remove-Job -Job $sync.networkJob
                     $sync.networkJob = $null
                 }
-                
+                ### Update UI to show progress
                 $Window.Dispatcher.Invoke([Action]{
-                    $sync.btnDiscoverNetwork.IsEnabled = $true
-                    $sync.pbSearch.Visibility = "Hidden"
-                    $sync.pbSearch.IsIndeterminate = $false
+                    $sync.btnDiscoverNetwork.IsEnabled = $true ### Enable button
+                    $sync.pbSearch.Visibility = "Hidden" ### Hide progress bar
+                    $sync.pbSearch.IsIndeterminate = $false ### Disable indeterminate mode
                 })
             }
         }
     })
-    
     $sync.networkTimer.Start()
 })
 
-### Event Handler für Suchen-Button
+### Event handler for search button
 $searchAction ={
     if ($txtComputerName.Text) {
         ### Show confirmation dialog
@@ -563,19 +570,20 @@ $searchAction ={
     }
 }
 
+### Event handler for network computer selection
 $cmbNetworkComputers.Add_SelectionChanged({
     if ($sync.cmbNetworkComputers.SelectedItem) {
-        $selected = $sync.cmbNetworkComputers.SelectedItem.ToString()
-        # Extract only the hostname part (everything before the first space or parenthesis)
+        $selected = $sync.cmbNetworkComputers.SelectedItem.ToString() 
+        ### Extract only the hostname part (everything before the first space or parenthesis)
         $hostname = $selected -replace '\s*\(.*$', ''
-        $txtComputerName.Text = $hostname
+        $txtComputerName.Text = $hostname ### Set the selected hostname to the computer name text box
     }
 })
 
-### Button click event implementieren
+### implement button click event
 $btnSearch.Add_Click($searchAction)
 
-### TextBox KeyDwon event implementieren
+### TextBox KeyDwon (Enter) event implementieren
 $txtComputerName.Add_KeyDown({
     param($s, $e)
     if ($e.Key -eq "Return") {
