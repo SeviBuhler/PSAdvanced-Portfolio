@@ -1,17 +1,19 @@
-# Als Administrator ausführen prüfen
+### Install-Certificate.ps1
+### Installs a certificate to the Trusted Root Store and sets the ExecutionPolicy to RemoteSigned.
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Warning "Bitte als Administrator ausführen!"
     break
 }
 
-# Zertifikat in den Trusted Root Store importieren
+# import the certificate and set the ExecutionPolicy
 $cerPath = "$PSScriptRoot\DTCertificate.cer"
 if (Test-Path $cerPath) {
     try {
+        ### import the certificate
         Import-Certificate -FilePath $cerPath -CertStoreLocation "Cert:\LocalMachine\Root"
         Write-Host "Zertifikat wurde erfolgreich installiert!" -ForegroundColor Green
         
-        # ExecutionPolicy setzen
+        ### set the ExecutionPolicy to RemoteSigned
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Force -Scope LocalMachine
         Write-Host "ExecutionPolicy wurde auf RemoteSigned gesetzt." -ForegroundColor Green
     }
