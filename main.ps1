@@ -328,12 +328,12 @@ function Get-ComputerInfo {
                             $sync.txtDateTime.Text = $result.DateTime
                             $sync.txtCompName.Text = $result.ComputerName
                             $sync.txtLastBoot.Text = $result.LastBoot
-                            $sync.txtModel.Text = $result.Model ?? "N/A"
-                            $sync.txtUser.Text = $result.UserName ?? "N/A"
-                            $sync.txtOS.Text = $result.OSCaption ?? "N/A"
-                            $sync.txtArch.Text = $result.OSArchitecture ?? "N/A"
-                            $sync.txtIP.Text = $result.IPAddress ?? "N/A"
-                            $sync.txtMAC.Text = $result.MACAddress ?? "N/A"
+                            $sync.txtModel.Text = if ($result.Model) { $result.Model } else { "N/A" }
+                            $sync.txtUser.Text = if ($result.UserName) { $result.UserName } else { "N/A" }
+                            $sync.txtOS.Text = if ($result.OSCaption) { $result.OSCaption } else { "N/A" }
+                            $sync.txtArch.Text = if ($result.OSArchitecture) { $result.OSArchitecture } else { "N/A" }
+                            $sync.txtIP.Text = if ($result.IPAddress) { $result.IPAddress } else { "N/A" }
+                            $sync.txtMAC.Text = if ($result.MACAddress) { $result.MACAddress } else { "N/A" }
                         }
                         else {
                             ### Clear all fields
